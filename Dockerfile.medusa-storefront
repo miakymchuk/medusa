@@ -1,0 +1,49 @@
+FROM node:20-alpine AS base
+
+# Install dependencies only when needed
+FROM base AS deps
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+
+# Copy package files and yarn configuration
+COPY package.json yarn.lock .yarnrc.yml ./
+COPY .yarn .yarn
+
+# Enable corepack and install dependencies
+RUN corepack enable && \
+    yarn set version 4.4.0 && \
+    yarn install --immutable
+
+# Rebuild the source code only when needed
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/.yarn ./.yarn
+COPY --from=deps /app/.yarnrc.yml ./
+COPY . .
+COPY ./.env.template ./.env
+
+
+ENV NEXT_TELEMETRY_DISABLED 1
+ENV NEXT_OUTPUT standalone
+
+RUN yarn build
+
+# Production image, copy all the files and run next
+FROM base AS runner
+WORKDIR /app
+
+ENV NODE_ENV production
+ENV NEXT_TELEMETRY_DISABLED 1
+
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+USER nextjs
+EXPOSE 8000
+ENV PORT 8000
+
+CMD ["node", "server.js"]
