@@ -1,0 +1,41 @@
+# Use Node.js 20 as a parent image
+FROM node:23 AS builder
+
+# Set the working directory
+WORKDIR /app
+
+# Clone the repository (shallow clone)
+COPY . .
+COPY ./.env.template ./.env
+
+# Enable Corepack and use the required Yarn version
+RUN corepack enable
+RUN corepack prepare yarn@4.4.0 --activate
+ENV YARN_VERSION=4.4.0
+
+
+# Install dependencies
+RUN yarn install --network-timeout 1000000000
+
+# Build the application
+RUN yarn build
+
+# SECOND STAGE: Minimal image for running the application
+FROM node:23-slim
+ENV YARN_VERSION=4.4.0
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
+# Set the working directory
+WORKDIR /app
+
+# Copy necessary files from the builder stage
+# COPY --from=builder /app/package.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/.medusa/server ./
+COPY --from=builder /app/scripts/entrypoint.sh ./scripts/
+RUN chmod +x /app/scripts/entrypoint.sh
+
+# Expose the application port
+EXPOSE 9000
+
+ENTRYPOINT [ "/app/scripts/entrypoint.sh" ]
